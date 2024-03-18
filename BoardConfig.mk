@@ -42,6 +42,9 @@ TARGET_2ND_CPU_VARIANT_RUNTIME := cortex-a55
 # OTA
 TARGET_OTA_ASSERT_DEVICE := yunluo
 
+# forces recovery to use latest available vndk
+BOARD_VNDK_VERSION := current
+
 # Bootloader
 TARGET_BOOTLOADER_BOARD_NAME := yunluo
 TARGET_NO_BOOTLOADER := true
