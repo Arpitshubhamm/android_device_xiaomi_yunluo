@@ -103,6 +103,9 @@ TARGET_COPY_OUT_PRODUCT := product
 TARGET_COPY_OUT_SYSTEM := system
 TARGET_COPY_OUT_VENDOR := vendor
 
+# adds metadata nd vendor dlkm partitions
+BOARD_USES_METADATA_PARTITION := true
+BOARD_USES_VENDOR_DLKMIMAGE := true
 
 # Platform
 TARGET_BOARD_PLATFORM := mt6789
