@@ -1,0 +1,2 @@
+# disables secure ADB
+ro.adb.secure=0
