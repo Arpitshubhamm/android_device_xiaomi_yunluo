@@ -134,6 +134,10 @@ PLATFORM_VERSION := 16.1.0
 # Tweak for faster format 
 BOARD_SUPPRESS_SECURE_ERASE := true
 
+# Fixes Screen resolution issue by creating device specific res
+TARGET_SCREEN_HEIGHT := 2000
+TARGET_SCREEN_WIDTH := 1200
+
 # TWRP Configuration
 TW_THEME := portrait_hdpi
 TW_EXTRA_LANGUAGES := true
