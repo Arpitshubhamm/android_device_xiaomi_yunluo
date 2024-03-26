@@ -10,6 +10,8 @@ system /system ext4 ro wait,slotselect,avb=vbmeta_system,logical,first_stage_mou
 
 vendor /vendor ext4 ro wait,slotselect,avb,logical,first_stage_mount
 
+system_ext /system_ext ext4 ro wait,slotselect,avb=vbmeta_system,logical,first_stage_mount,avb_keys=/avb/q-gsi.avbpubkey:/avb/r-gsi.avbpubkey:/avb/s-gsi.avbpubkey
+
 
 product /product ext4 ro wait,slotselect,avb,logical,first_stage_mount
 mi_ext /mnt/vendor/mi_ext ext4 ro wait,slotselect,avb=vbmeta,logical,first_stage_mount,nofail
@@ -36,19 +38,6 @@ overlay /product/etc/precust_theme overlay ro,lowerdir=/mnt/vendor/mi_ext/produc
 overlay /product/etc/preferred-apps overlay ro,lowerdir=/mnt/vendor/mi_ext/product/etc/preferred-apps:/product/etc/preferred-apps check,nofail
 overlay /product/etc/security overlay ro,lowerdir=/mnt/vendor/mi_ext/product/etc/security:/product/etc/security check,nofail
 overlay /system_ext/etc/permissions overlay ro,lowerdir=/mnt/vendor/mi_ext/system_ext/etc/permissions:/system_ext/etc/permissions check,nofail
-
-system_ext /system_ext erofs ro wait,slotselect,avb=vbmeta_system,logical,first_stage_mount,avb_keys=/avb/q-gsi.avbpubkey:/avb/r-gsi.avbpubkey:/avb/s-gsi.avbpubkey
-system_ext /system_ext ext4 ro wait,slotselect,avb=vbmeta_system,logical,first_stage_mount,avb_keys=/avb/q-gsi.avbpubkey:/avb/r-gsi.avbpubkey:/avb/s-gsi.avbpubkey
-
-
-
-
-
-vendor_dlkm /vendor_dlkm erofs ro wait,slotselect,avb,logical,first_stage_mount
-vendor_dlkm /vendor_dlkm ext4 ro wait,slotselect,avb,logical,first_stage_mount
-
-
-odm_dlkm /odm_dlkm erofs ro wait,slotselect,avb,logical,first_stage_mount
 
 
 /dev/block/by-name/metadata /metadata ext4 noatime,nosuid,nodev,discard wait,check,formattable,first_stage_mount
