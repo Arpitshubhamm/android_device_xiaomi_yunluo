@@ -1,9 +1,3 @@
-# Copyright (C) 2012 The Android Open Source Project
-#
-# IMPORTANT: Do not create world writable files or directories.
-# This is a common source of Android security bugs.
-#
-
 import /init.recovery.logd.rc
 import /init.recovery.ldconfig.rc
 #import /init.recovery.mksh.rc
@@ -11,477 +5,213 @@ import /init.recovery.usb.rc
 import /init.recovery.service.rc
 import /init.recovery.${ro.hardware}.rc
 
-# Cgroups are mounted right before early-init using list from /etc/cgroups.json
 on early-init
-    # Disable sysrq from keyboard
-    write /proc/sys/kernel/sysrq 0
-
-    # Android doesn't need kernel module autoloading, and it causes SELinux
-    # denials.  So disable it by setting modprobe to the empty string.  Note: to
-    # explicitly set a sysctl to an empty string, a trailing newline is needed.
-    write /proc/sys/kernel/modprobe \n
-
-    # Set the security context of /adb_keys if present.
-    restorecon /adb_keys
-
     # Set the security context of /postinstall if present.
     restorecon /postinstall
 
+    # ueventd wants to write to /acct
+    mount cgroup none /acct cpuacct
     mkdir /acct/uid
-
-    # memory.pressure_level used by lmkd
-    chown root system /dev/memcg/memory.pressure_level
-    chmod 0040 /dev/memcg/memory.pressure_level
-    # app mem cgroups, used by activity manager, lmkd and zygote
-    mkdir /dev/memcg/apps/ 0755 system system
-    # cgroup for system_server and surfaceflinger
-    mkdir /dev/memcg/system 0550 system system
-    
-    # MIUI ADD: Performance_MemoryEnhance
-    # cgroup for MemoryFreezeProcess
-    mkdir /dev/memcg/freeze-app 0755 system system
-    write /dev/memcg/freeze-app/memory.swappiness 60
-    # END Performance_MemoryEnhance
-    
-    # symlink the Android specific /dev/tun to Linux expected /dev/net/tun
-    mkdir /dev/net 0755 root root
-    symlink ../tun /dev/net/tun
-
-    # set RLIMIT_NICE to allow priorities from 19 to -20
-    setrlimit nice 40 40
-
-    # Allow up to 32K FDs per process
-    setrlimit nofile 32768 32768
-
-    # set RLIMIT_MEMLOCK to 64KB
-    setrlimit memlock 65536 65536
-
-    # Set up linker config subdirectories based on mount namespaces
-    mkdir /linkerconfig/bootstrap 0755
-    mkdir /linkerconfig/default 0755
-
-    # Disable dm-verity hash prefetching, since it doesn't help performance
-    # Read more in b/136247322
-    write /sys/module/dm_verity/parameters/prefetch_cluster 0
-
-    # Generate empty ld.config.txt for early executed processes which rely on
-    # /system/lib libraries.
-    write /linkerconfig/bootstrap/ld.config.txt \#
-    write /linkerconfig/default/ld.config.txt \#
-    chmod 644 /linkerconfig/bootstrap/ld.config.txt
-    chmod 644 /linkerconfig/default/ld.config.txt
-
-    # Mount bootstrap linker configuration as current
-    mount none /linkerconfig/bootstrap /linkerconfig bind rec
+    # Copy prebuilt ld.config.txt into linkerconfig directory
+    copy /system/etc/ld.config.txt /linkerconfig/ld.config.txt
+    chmod 444 /linkerconfig/ld.config.txt
 
     start ueventd
 
-    # Run apexd-bootstrap so that APEXes that provide critical libraries
-    # become available. Note that this is executed as exec_start to ensure that
-    # the libraries are available to the processes started after this statement.
-    exec_start apexd-bootstrap
+    setprop sys.usb.configfs 0
 
-    # Generate linker config based on apex mounted in bootstrap namespace
-    update_linker_config
-
-    # These must already exist by the time boringssl_self_test32 / boringssl_self_test64 run.
-    mkdir /dev/boringssl 0755 root root
-    mkdir /dev/boringssl/selftest 0755 root root
-
-    # Mount tracefs (with GID=AID_READTRACEFS)
-    mount tracefs tracefs /sys/kernel/tracing gid=3012
-
-    # create sys dirctory
-    mkdir /dev/sys 0755 system system
-    mkdir /dev/sys/fs 0755 system system
-    mkdir /dev/sys/block 0755 system system
-
-    # Create location for fs_mgr to store abbreviated output from filesystem
-    # checker programs.
-    mkdir /dev/fscklogs 0770 root system
-    # MIUI ADD: Performance_MemoryEnhance
-    on property:sys.boot_completed=1
-    write /dev/memcg/freeze-app/memory.anno_writeback_enable 1
-    # END Performance_MemoryEnhance
 on init
-    sysclktz 0
+    export PATH /sbin:/system/bin
+    export LD_LIBRARY_PATH /system/lib64:/vendor/lib64/hw
 
-    # Mix device-specific information into the entropy pool
-    copy /proc/cmdline /dev/urandom
-    copy /system/etc/prop.default /dev/urandom
+    export ANDROID_ROOT /system
+    export ANDROID_DATA /data
+    export EXTERNAL_STORAGE /sdcard
 
     symlink /proc/self/fd/0 /dev/stdin
     symlink /proc/self/fd/1 /dev/stdout
     symlink /proc/self/fd/2 /dev/stderr
 
-    # Create energy-aware scheduler tuning nodes
-    mkdir /dev/stune/foreground
-    mkdir /dev/stune/background
-    mkdir /dev/stune/top-app
-    mkdir /dev/stune/rt
-    chown system system /dev/stune
-    chown system system /dev/stune/foreground
-    chown system system /dev/stune/background
-    chown system system /dev/stune/top-app
-    chown system system /dev/stune/rt
-    chown system system /dev/stune/tasks
-    chown system system /dev/stune/foreground/tasks
-    chown system system /dev/stune/background/tasks
-    chown system system /dev/stune/top-app/tasks
-    chown system system /dev/stune/rt/tasks
-    chown system system /dev/stune/cgroup.procs
-    chown system system /dev/stune/foreground/cgroup.procs
-    chown system system /dev/stune/background/cgroup.procs
-    chown system system /dev/stune/top-app/cgroup.procs
-    chown system system /dev/stune/rt/cgroup.procs
-    chmod 0664 /dev/stune/tasks
-    chmod 0664 /dev/stune/foreground/tasks
-    chmod 0664 /dev/stune/background/tasks
-    chmod 0664 /dev/stune/top-app/tasks
-    chmod 0664 /dev/stune/rt/tasks
-    chmod 0664 /dev/stune/cgroup.procs
-    chmod 0664 /dev/stune/foreground/cgroup.procs
-    chmod 0664 /dev/stune/background/cgroup.procs
-    chmod 0664 /dev/stune/top-app/cgroup.procs
-    chmod 0664 /dev/stune/rt/cgroup.procs
+    symlink /system/bin /bin
+    symlink /system/etc /etc
 
-    # cpuctl hierarchy for devices using utilclamp
-    mkdir /dev/cpuctl/foreground
-    mkdir /dev/cpuctl/background
-    mkdir /dev/cpuctl/top-app
-    mkdir /dev/cpuctl/rt
-    mkdir /dev/cpuctl/system
-    mkdir /dev/cpuctl/system-background
-    mkdir /dev/cpuctl/dex2oat
-    chown system system /dev/cpuctl
-    chown system system /dev/cpuctl/foreground
-    chown system system /dev/cpuctl/background
-    chown system system /dev/cpuctl/top-app
-    chown system system /dev/cpuctl/rt
-    chown system system /dev/cpuctl/system
-    chown system system /dev/cpuctl/system-background
-    chown system system /dev/cpuctl/dex2oat
-    chown system system /dev/cpuctl/tasks
-    chown system system /dev/cpuctl/foreground/tasks
-    chown system system /dev/cpuctl/background/tasks
-    chown system system /dev/cpuctl/top-app/tasks
-    chown system system /dev/cpuctl/rt/tasks
-    chown system system /dev/cpuctl/system/tasks
-    chown system system /dev/cpuctl/system-background/tasks
-    chown system system /dev/cpuctl/dex2oat/tasks
-    chown system system /dev/cpuctl/cgroup.procs
-    chown system system /dev/cpuctl/foreground/cgroup.procs
-    chown system system /dev/cpuctl/background/cgroup.procs
-    chown system system /dev/cpuctl/top-app/cgroup.procs
-    chown system system /dev/cpuctl/rt/cgroup.procs
-    chown system system /dev/cpuctl/system/cgroup.procs
-    chown system system /dev/cpuctl/system-background/cgroup.procs
-    chown system system /dev/cpuctl/dex2oat/cgroup.procs
-    chmod 0664 /dev/cpuctl/tasks
-    chmod 0664 /dev/cpuctl/foreground/tasks
-    chmod 0664 /dev/cpuctl/background/tasks
-    chmod 0664 /dev/cpuctl/top-app/tasks
-    chmod 0664 /dev/cpuctl/rt/tasks
-    chmod 0664 /dev/cpuctl/system/tasks
-    chmod 0664 /dev/cpuctl/system-background/tasks
-    chmod 0664 /dev/cpuctl/dex2oat/tasks
-    chmod 0664 /dev/cpuctl/cgroup.procs
-    chmod 0664 /dev/cpuctl/foreground/cgroup.procs
-    chmod 0664 /dev/cpuctl/background/cgroup.procs
-    chmod 0664 /dev/cpuctl/top-app/cgroup.procs
-    chmod 0664 /dev/cpuctl/rt/cgroup.procs
-    chmod 0664 /dev/cpuctl/system/cgroup.procs
-    chmod 0664 /dev/cpuctl/system-background/cgroup.procs
-    chmod 0664 /dev/cpuctl/dex2oat/cgroup.procs
+    mount cgroup none /acct cpuacct
+    mkdir /acct/uid
 
-    # Create a cpu group for NNAPI HAL processes
-    mkdir /dev/cpuctl/nnapi-hal
-    chown system system /dev/cpuctl/nnapi-hal
-    chown system system /dev/cpuctl/nnapi-hal/tasks
-    chown system system /dev/cpuctl/nnapi-hal/cgroup.procs
-    chmod 0664 /dev/cpuctl/nnapi-hal/tasks
-    chmod 0664 /dev/cpuctl/nnapi-hal/cgroup.procs
-    write /dev/cpuctl/nnapi-hal/cpu.uclamp.min 1
-    write /dev/cpuctl/nnapi-hal/cpu.uclamp.latency_sensitive 1
+    mkdir /sdcard
+    mkdir /system
+    mkdir /data
+    symlink /data/cache /cache
+    mkdir /sideload
+    mkdir /mnt/system
+    mount tmpfs tmpfs /tmp
 
-    # Create a cpu group for camera daemon processes
-    mkdir /dev/cpuctl/camera-daemon
-    chown system system /dev/cpuctl/camera-daemon
-    chown system system /dev/cpuctl/camera-daemon/tasks
-    chown system system /dev/cpuctl/camera-daemon/cgroup.procs
-    chmod 0664 /dev/cpuctl/camera-daemon/tasks
-    chmod 0664 /dev/cpuctl/camera-daemon/cgroup.procs
+    chown root shell /tmp
+    chmod 0775 /tmp
+    mkdir /tmp/misc
+    mkdir /tmp/misc/keystore/
 
-    # Create an stune group for camera-specific processes
-    mkdir /dev/stune/camera-daemon
-    chown system system /dev/stune/camera-daemon
-    chown system system /dev/stune/camera-daemon/tasks
-    chown system system /dev/stune/camera-daemon/cgroup.procs
-    chmod 0664 /dev/stune/camera-daemon/tasks
-    chmod 0664 /dev/stune/camera-daemon/cgroup.procs
+    write /proc/sys/kernel/panic_on_oops 1
+    write /proc/sys/vm/max_map_count 1000000
 
-    # Create an stune group for NNAPI HAL processes
-    mkdir /dev/stune/nnapi-hal
-    chown system system /dev/stune/nnapi-hal
-    chown system system /dev/stune/nnapi-hal/tasks
-    chown system system /dev/stune/nnapi-hal/cgroup.procs
-    chmod 0664 /dev/stune/nnapi-hal/tasks
-    chmod 0664 /dev/stune/nnapi-hal/cgroup.procs
-    write /dev/stune/nnapi-hal/schedtune.boost 1
-    write /dev/stune/nnapi-hal/schedtune.prefer_idle 1
-
-    # Create blkio group and apply initial settings.
-    # This feature needs kernel to support it, and the
-    # device's init.rc must actually set the correct values.
-    mkdir /dev/blkio/background
-    chown system system /dev/blkio
-    chown system system /dev/blkio/background
-    chown system system /dev/blkio/tasks
-    chown system system /dev/blkio/background/tasks
-    chown system system /dev/blkio/cgroup.procs
-    chown system system /dev/blkio/background/cgroup.procs
-    chmod 0664 /dev/blkio/tasks
-    chmod 0664 /dev/blkio/background/tasks
-    chmod 0664 /dev/blkio/cgroup.procs
-    chmod 0664 /dev/blkio/background/cgroup.procs
-    write /dev/blkio/blkio.weight 1000
-    write /dev/blkio/background/blkio.weight 200
-    write /dev/blkio/background/blkio.bfq.weight 10
-    write /dev/blkio/blkio.group_idle 0
-    write /dev/blkio/background/blkio.group_idle 0
-
-    restorecon_recursive /mnt
-
-    mount configfs none /config nodev noexec nosuid
-    chmod 0770 /config/sdcardfs
-    chown system package_info /config/sdcardfs
-
-    # Mount binderfs
     mkdir /dev/binderfs
     mount binder binder /dev/binderfs stats=global
     chmod 0755 /dev/binderfs
-
-    # Mount fusectl
-    mount fusectl none /sys/fs/fuse/connections
-
+    chmod 0666 /dev/binderfs/hwbinder
+    chmod 0666 /dev/binderfs/binder
+    chmod 0666 /dev/binderfs/vndbinder
     symlink /dev/binderfs/binder /dev/binder
     symlink /dev/binderfs/hwbinder /dev/hwbinder
     symlink /dev/binderfs/vndbinder /dev/vndbinder
 
-    chmod 0666 /dev/binderfs/hwbinder
-    chmod 0666 /dev/binderfs/binder
-    chmod 0666 /dev/binderfs/vndbinder
+    # Create location for fs_mgr to store abbreviated output from filesystem
+    # checker programs.
+    mkdir /dev/fscklogs 0770 root system
+# For vibrator
+   write /sys/class/leds/vibrator/trigger "transient"
+#
 
-    mkdir /mnt/secure 0700 root root
-    mkdir /mnt/secure/asec 0700 root root
-    mkdir /mnt/asec 0755 root system
-    mkdir /mnt/obb 0755 root system
-    mkdir /mnt/media_rw 0750 root external_storage
-    mkdir /mnt/user 0755 root root
-    mkdir /mnt/user/0 0755 root root
-    mkdir /mnt/user/0/self 0755 root root
-    mkdir /mnt/user/0/emulated 0755 root root
-    mkdir /mnt/user/0/emulated/0 0755 root root
+on boot
+    ifup lo
+    hostname localhost
+    domainname localdomain
+    class_start default
 
-    # Prepare directories for pass through processes
-    mkdir /mnt/pass_through 0700 root root
-    mkdir /mnt/pass_through/0 0710 root media_rw
-    mkdir /mnt/pass_through/0/self 0710 root media_rw
-    mkdir /mnt/pass_through/0/emulated 0710 root media_rw
-    mkdir /mnt/pass_through/0/emulated/0 0710 root media_rw
 
-    mkdir /mnt/expand 0771 system system
-    mkdir /mnt/appfuse 0711 root root
-    # MIUI ADD: PORTING_LogEnhance
-    mkdir /mnt/rescue 0755 root root
-    # END PORTING_LogEnhance
+on firmware_mounts_complete
+    rm /dev/.booting
 
-    # Storage views to support runtime permissions
-    mkdir /mnt/runtime 0700 root root
-    mkdir /mnt/runtime/default 0755 root root
-    mkdir /mnt/runtime/default/self 0755 root root
-    mkdir /mnt/runtime/read 0755 root root
-    mkdir /mnt/runtime/read/self 0755 root root
-    mkdir /mnt/runtime/write 0755 root root
-    mkdir /mnt/runtime/write/self 0755 root root
-    mkdir /mnt/runtime/full 0755 root root
-    mkdir /mnt/runtime/full/self 0755 root root
 
-    # Symlink to keep legacy apps working in multi-user world
-    symlink /storage/self/primary /mnt/sdcard
-    symlink /mnt/user/0/primary /mnt/runtime/default/self/primary
+# Mount filesystems and start core system services.
+on late-init
+    trigger early-fs
+    trigger fs
+    trigger post-fs
+    trigger post-fs-data
 
-    write /proc/sys/kernel/panic_on_oops 1
-    write /proc/sys/kernel/hung_task_timeout_secs 0
-    write /proc/cpu/alignment 4
+    # Remove a file to wake up anything waiting for firmware
+    trigger firmware_mounts_complete
 
-    # scheduler tunables
-    # Disable auto-scaling of scheduler tunables with hotplug. The tunables
-    # will vary across devices in unpredictable ways if allowed to scale with
-    # cpu cores.
-    write /proc/sys/kernel/sched_tunable_scaling 0
-    write /proc/sys/kernel/sched_latency_ns 10000000
-    write /proc/sys/kernel/sched_wakeup_granularity_ns 2000000
-    write /proc/sys/kernel/sched_child_runs_first 0
+    trigger early-boot
+    trigger boot
 
-    write /proc/sys/kernel/randomize_va_space 2
-    write /proc/sys/vm/mmap_min_addr 32768
-    write /proc/sys/net/ipv4/ping_group_range "0 2147483647"
-    write /proc/sys/net/unix/max_dgram_qlen 2400
+on post-fs-data
+    # Set fscklog permission
+    chown root system /dev/fscklogs/log
+    chmod 0770 /dev/fscklogs/log
 
-    # Assign reasonable ceiling values for socket rcv/snd buffers.
-    # These should almost always be overridden by the target per the
-    # the corresponding technology maximums.
-    write /proc/sys/net/core/rmem_max  262144
-    write /proc/sys/net/core/wmem_max  262144
+service ueventd /system/bin/ueventd
+    critical
+    seclabel u:r:ueventd:s0
 
-    # reflect fwmark from incoming packets onto generated replies
-    write /proc/sys/net/ipv4/fwmark_reflect 1
-    write /proc/sys/net/ipv6/fwmark_reflect 1
+service adbd /system/bin/adbd --root_seclabel=u:r:su:s0 --device_banner=recovery
+    disabled
+    socket adbd stream 660 system system
+    seclabel u:r:adbd:s0
 
-    # set fwmark on accepted sockets
-    write /proc/sys/net/ipv4/tcp_fwmark_accept 1
+# Always start adbd on userdebug and eng builds
+on property:ro.debuggable=1
+    #write /sys/class/android_usb/android0/enable 1
+    #start adbd
+    setprop service.adb.root 1
 
-    # disable icmp redirects
-    write /proc/sys/net/ipv4/conf/all/accept_redirects 0
-    write /proc/sys/net/ipv6/conf/all/accept_redirects 0
+# Always start adbd on userdebug and eng builds
+on fs && property:ro.debuggable=1
+    setprop sys.usb.config adb
 
-    # /proc/net/fib_trie leaks interface IP addresses
-    chmod 0400 /proc/net/fib_trie
+service fastbootd /system/bin/fastbootd
+    disabled
+    group system
+    seclabel u:r:fastbootd:s0
 
-    # sets up initial cpusets for ActivityManager
-    # this ensures that the cpusets are present and usable, but the device's
-    # init.rc must actually set the correct cpus
-    mkdir /dev/cpuset/foreground
-    copy /dev/cpuset/cpus /dev/cpuset/foreground/cpus
-    copy /dev/cpuset/mems /dev/cpuset/foreground/mems
-    # MIUI ADD: Performance_DisplayFluencyEnhance
-    mkdir /dev/cpuset/foreground/boost
-    copy /dev/cpuset/cpus /dev/cpuset/foreground/boost/cpus
-    copy /dev/cpuset/mems /dev/cpuset/foreground/boost/mems
-    # END Performance_DisplayFluencyEnhance
-    mkdir /dev/cpuset/background
-    copy /dev/cpuset/cpus /dev/cpuset/background/cpus
-    copy /dev/cpuset/mems /dev/cpuset/background/mems
+# Restart adbd so it can run as root
+on property:service.adb.root=1
+    restart adbd
 
-    # system-background is for system tasks that should only run on
-    # little cores, not on bigs
-    mkdir /dev/cpuset/system-background
-    copy /dev/cpuset/cpus /dev/cpuset/system-background/cpus
-    copy /dev/cpuset/mems /dev/cpuset/system-background/mems
+on fs && property:sys.usb.configfs=1
+    mount configfs none /config
+    mkdir /config/usb_gadget/g1 0770 shell shell
+    write /config/usb_gadget/g1/idVendor 0x18D1
+    mkdir /config/usb_gadget/g1/strings/0x409 0770
+    write /config/usb_gadget/g1/strings/0x409/serialnumber ${ro.serialno}
+    write /config/usb_gadget/g1/strings/0x409/manufacturer ${ro.product.manufacturer}
+    write /config/usb_gadget/g1/strings/0x409/product ${ro.product.model}
+    mkdir /config/usb_gadget/g1/functions/ffs.adb
+    mkdir /config/usb_gadget/g1/functions/ffs.fastboot
+    mkdir /config/usb_gadget/g1/configs/b.1 0777 shell shell
+    mkdir /config/usb_gadget/g1/configs/b.1/strings/0x409 0770 shell shell
 
-    # restricted is for system tasks that are being throttled
-    # due to screen off.
-    mkdir /dev/cpuset/restricted
-    copy /dev/cpuset/cpus /dev/cpuset/restricted/cpus
-    copy /dev/cpuset/mems /dev/cpuset/restricted/mems
+on fs && property:sys.usb.configfs=0
+    write /sys/class/android_usb/android0/f_ffs/aliases adb,fastboot
+    write /sys/class/android_usb/android0/idVendor 18D1
+    write /sys/class/android_usb/android0/iManufacturer ${ro.product.manufacturer}
+    write /sys/class/android_usb/android0/iProduct ${ro.product.model}
+    write /sys/class/android_usb/android0/iSerial ${ro.serialno}
 
-    mkdir /dev/cpuset/top-app
-    copy /dev/cpuset/cpus /dev/cpuset/top-app/cpus
-    copy /dev/cpuset/mems /dev/cpuset/top-app/mems
+on fs
+    mount pstore pstore /sys/fs/pstore
+    mkdir /dev/usb-ffs 0770 shell shell
+    mkdir /dev/usb-ffs/adb 0770 shell shell
+    mount functionfs adb /dev/usb-ffs/adb uid=2000,gid=2000
+    mkdir /dev/usb-ffs/fastboot 0770 system system
+    mount functionfs fastboot /dev/usb-ffs/fastboot rmode=0770,fmode=0660,uid=1000,gid=1000
 
-    # create a cpuset for camera daemon processes
-    mkdir /dev/cpuset/camera-daemon
-    copy /dev/cpuset/cpus /dev/cpuset/camera-daemon/cpus
-    copy /dev/cpuset/mems /dev/cpuset/camera-daemon/mems
+on property:sys.usb.config=adb
+    start adbd
 
-# MIUI ADD: Camera_PerformanceEnhance
-    #create cpuset for camera background
-    mkdir /dev/cpuset/camera-background
-    copy /dev/cpuset/cpus /dev/cpuset/camera-background/cpus
-    copy /dev/cpuset/mems /dev/cpuset/camera-background/mems
-    mkdir /dev/cpuset/camera-background/background
-    copy /dev/cpuset/cpus /dev/cpuset/camera-background/background/cpus
-    copy /dev/cpuset/mems /dev/cpuset/camera-background/background/mems
-    mkdir /dev/cpuset/camera-background/limit
-    copy /dev/cpuset/cpus /dev/cpuset/camera-background/limit/cpus
-    copy /dev/cpuset/mems /dev/cpuset/camera-background/limit/mems
-# END Camera_PerformanceEnhance
+on property:sys.usb.config=fastboot
+    start fastbootd
 
-# MIUI ADD: Performance_SpeedUI
-    mkdir /dev/cpuset/ui
-    copy /dev/cpuset/cpus /dev/cpuset/ui/cpus
-    write /dev/cpuset/ui/cpus 4-7
-    copy /dev/cpuset/mems /dev/cpuset/ui/mems
-# END Performance_SpeedUI
+on property:sys.usb.config=none && property:sys.usb.configfs=0
+    stop adbd
+    stop fastbootd
+    write /sys/class/android_usb/android0/enable 0
+    setprop sys.usb.state ${sys.usb.config}
 
-    # change permissions for all cpusets we'll touch at runtime
-    chown system system /dev/cpuset
-    chown system system /dev/cpuset/foreground
-    chown system system /dev/cpuset/background
-    chown system system /dev/cpuset/system-background
-    chown system system /dev/cpuset/top-app
-    chown system system /dev/cpuset/restricted
-    chown system system /dev/cpuset/camera-daemon
-    chown system system /dev/cpuset/tasks
-    chown system system /dev/cpuset/foreground/tasks
-    chown system system /dev/cpuset/background/tasks
-    chown system system /dev/cpuset/system-background/tasks
-    chown system system /dev/cpuset/top-app/tasks
-    chown system system /dev/cpuset/restricted/tasks
-    chown system system /dev/cpuset/camera-daemon/tasks
-    chown system system /dev/cpuset/cgroup.procs
-    chown system system /dev/cpuset/foreground/cgroup.procs
-    chown system system /dev/cpuset/background/cgroup.procs
-    chown system system /dev/cpuset/system-background/cgroup.procs
-    chown system system /dev/cpuset/top-app/cgroup.procs
-    chown system system /dev/cpuset/restricted/cgroup.procs
-    chown system system /dev/cpuset/camera-daemon/cgroup.procs
-# MIUI ADD: Camera_PerformanceEnhance
-    chown system system /dev/cpuset/camera-background
-    chown system system /dev/cpuset/camera-background/tasks
-    chown system system /dev/cpuset/camera-background/background/tasks
-    chown system system /dev/cpuset/camera-background/limit/tasks
-    chown system system /dev/cpuset/camera-background/cgroup.procs
-    chown system system /dev/cpuset/camera-background/background/cgroup.procs
-    chown system system /dev/cpuset/camera-background/limit/cgroup.procs
-# END Camera_PerformanceEnhance
-# MIUI ADD: Performance_SpeedUI
-    chown system system /dev/cpuset/ui
-    chown system system /dev/cpuset/ui/tasks
-# END Performance_SpeedUI
+on property:sys.usb.config=adb && property:sys.usb.configfs=0
+    write /sys/class/android_usb/android0/idProduct D001
+    write /sys/class/android_usb/android0/functions adb
+    write /sys/class/android_usb/android0/enable 1
+    setprop sys.usb.state ${sys.usb.config}
 
-    # set system-background to 0775 so SurfaceFlinger can touch it
-    chmod 0775 /dev/cpuset/system-background
+on property:sys.usb.config=sideload && property:sys.usb.configfs=0
+    write /sys/class/android_usb/android0/idProduct D001
+    write /sys/class/android_usb/android0/functions adb
+    write /sys/class/android_usb/android0/enable 1
+    setprop sys.usb.state ${sys.usb.config}
 
-    chmod 0664 /dev/cpuset/foreground/tasks
-    chmod 0664 /dev/cpuset/background/tasks
-    chmod 0664 /dev/cpuset/system-background/tasks
-    chmod 0664 /dev/cpuset/top-app/tasks
-    chmod 0664 /dev/cpuset/restricted/tasks
-    chmod 0664 /dev/cpuset/tasks
-    chmod 0664 /dev/cpuset/camera-daemon/tasks
-    chmod 0664 /dev/cpuset/foreground/cgroup.procs
-    chmod 0664 /dev/cpuset/background/cgroup.procs
-    chmod 0664 /dev/cpuset/system-background/cgroup.procs
-    chmod 0664 /dev/cpuset/top-app/cgroup.procs
-    chmod 0664 /dev/cpuset/restricted/cgroup.procs
-    chmod 0664 /dev/cpuset/cgroup.procs
-    chmod 0664 /dev/cpuset/camera-daemon/cgroup.procs
-# MIUI ADD: Camera_PerformanceEnhance
-    chmod 0664 /dev/cpuset/camera-background/tasks
-    chmod 0664 /dev/cpuset/camera-background/background/tasks
-    chmod 0664 /dev/cpuset/camera-background/limit/tasks
-    chmod 0664 /dev/cpuset/camera-background/cgroup.procs
-    chmod 0664 /dev/cpuset/camera-background/background/cgroup.procs
-    chmod 0664 /dev/cpuset/camera-background/limit/cgroup.procs
-# END Camera_PerformanceEnhance
-# MIUI ADD: Performance_SpeedUI
-    chmod 0664 /dev/cpuset/ui/tasks
-# END Performance_SpeedUI
+on property:sys.usb.config=fastboot && property:sys.usb.configfs=0
+    write /sys/class/android_usb/android0/idProduct 4EE0
+    write /sys/class/android_usb/android0/functions fastboot
+    write /sys/class/android_usb/android0/enable 1
+    setprop sys.usb.state ${sys.usb.config}
 
-    # make the PSI monitor accessible to others
-    chown system system /proc/pressure/memory
-    chmod 0664 /proc/pressure/memory
+# Configfs triggers
+on property:sys.usb.config=none && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/UDC "none"
+    stop adbd
+    stop fastbootd
+    setprop sys.usb.ffs.ready 0
+    rm /config/usb_gadget/g1/configs/b.1/f1
+    setprop sys.usb.state ${sys.usb.config}
 
-    # qtaguid will limit access to specific data based on group memberships.
-    #   net_bw_acct grants impersonation of socket owners.
-    #   net_bw_stats grants access to other apps' detailed tagged-socket stats.
-    chown root net_bw_acct /proc/net/xt_qtaguid/ctrl
-    chown root net_bw_stats /proc/net/xt_qtaguid/stats
+on property:sys.usb.config=sideload && property:sys.usb.ffs.ready=1 && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0xD001
+    write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "adb"
+    symlink /config/usb_gadget/g1/functions/ffs.adb /config/usb_gadget/g1/configs/b.1/f1
+    write /config/usb_gadget/g1/UDC ${sys.usb.controller}
+    setprop sys.usb.state ${sys.usb.config}
 
-    # Allow everybody to read the xt_qtaguid resource tracking misc dev.
-    # This is needed by any process that uses socket tagging.
-    chmod 0644 /dev/xt_qtaguid
+on property:sys.usb.config=adb && property:sys.usb.ffs.ready=1 && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0xD001
+    write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "adb"
+    symlink /config/usb_gadget/g1/functions/ffs.adb /config/usb_gadget/g1/configs/b.1/f1
+    write /config/usb_gadget/g1/UDC ${sys.usb.controller}
+    setprop sys.usb.state ${sys.usb.config}
 
-    mount bpf bp
+on property:sys.usb.config=fastboot && property:sys.usb.ffs.ready=1 && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0x4EE0
+    write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "fastboot"
+    symlink /config/usb_gadget/g1/functions/ffs.fastboot /config/usb_gadget/g1/configs/b.1/f1
+    write /config/usb_gadget/g1/UDC ${sys.usb.controller}
+    setprop sys.usb.state ${sys.usb.config}
