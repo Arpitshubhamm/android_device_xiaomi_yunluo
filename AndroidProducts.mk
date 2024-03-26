@@ -6,4 +6,4 @@
 #
 
 PRODUCT_MAKEFILES := \
-    $(LOCAL_DIR)/twrp_yunluo.mk
+    $(LOCAL_DIR)/pb_yunluo.mk
