@@ -1,102 +1,26 @@
 import /init.microtrust.rc
 
 on init
+    # Create a more standard /dev/block layout for our scripts
+    symlink /dev/block/platform/bootdevice /dev/block/bootdevice
+    mkdir /mnt/vendor/persist 0700 root root
+    mount ext4 /dev/block/platform/bootdevice/by-name/persist /mnt/vendor/persist
+    export LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw
     setprop sys.usb.configfs 1
     setprop sys.usb.controller "musb-hdrc"
-    setprop sys.usb.ffs.aio_compat 0
+    setprop sys.usb.ffs.aio_compat 1
+    setprop crypto.ready 1
+    
+on fs
+    install_keyring
 
-on fs && property:ro.debuggable=0
-    # distinguish USB shoulde connect or not, i.e. CDP vs SDP
-    # write /sys/class/udc/musb-hdrc/device/cmode 2
-    # set charging free due to it wait for USB activation
-    start adbd
 
 on post-fs
-    start boot-hal-1-2
+   start boot-hal-1-2
     exec u:r:update_engine:s0 root root -- /system/bin/mtk_plpath_utils
     start mtk.plpath.utils.link
 
-on boot
-    start health-hal-2-1
-    chown system system /dev/xiaomi-touch
-    chmod 0664 /dev/xiaomi-touch
-
-service touchfeature-hal-1-0 /vendor/bin/hw/vendor.xiaomi.hardware.touchfeature@1.0-service
-    class main
-    user root
-    group root
-    onrestart restart touchfeature-hal-1-0
-    seclabel u:r:recovery:s0
-
-service gatekeeperd /system/bin/gatekeeperd /data/misc/gatekeeper
-    class late_start
-    user system
-    writepid /dev/cpuset/system-background/tasks
-
-service keymint-beanpod /vendor/bin/hw/android.hardware.security.keymint@1.0-service.beanpod
-    interface android.hardware.keymaster@4.0::IKeymasterDevice default
-    interface android.hardware.keymaster@4.1::IKeymasterDevice default
-    user root
-    group root drmrpc
-    disabled
-    oneshot
-    seclabel u:r:recovery:s0
-
-service hwservicemanager /system/bin/hwservicemanager
-    user system
-    disabled
-    group system readproc
-    critical
-    onrestart setprop hwservicemanager.ready false
-    onrestart class_restart main
-    onrestart class_restart hal
-    onrestart class_restart early_hal
-    task_profiles ServiceCapacityLow HighPerformance
-    class animation
-    shutdown critical
-
-service keystore2 /system/bin/keystore2 /data/misc/keystore
-    class early_hal
-    user keystore
-    group keystore readproc log
-    writepid /dev/cpuset/foreground/tasks
-
-service mtk.plpath.utils.link /system/bin/mtk_plpath_utils
-    class main
-    user root
-    group root system
-    oneshot
-    disabled
-
-service servicemanager /system/bin/servicemanager
-    class core animation
-    user system
-    group system readproc
-    critical
-    onrestart restart apexd
-    onrestart restart audioserver
-    onrestart restart gatekeeperd
-    onrestart class_restart main
-    onrestart class_restart hal
-    onrestart class_restart early_hal
-    writepid /dev/cpuset/system-background/tasks
-    shutdown critical
-
-service snapuserd /system/bin/snapuserd
-    socket snapuserd stream 0660 system system
-    oneshot
-    disabled
-    user root
-    group root system
-    seclabel u:r:snapuserd:s0
-
-service wait_for_keymaster /system/bin/wait_for_keymaster
-    user root
-    group root system
-    priority -20
-    ioprio rt 0
-
-on property:persist.vendor.mtk.pl_lnk=1
+    on property:persist.vendor.mtk.pl_lnk=1
     symlink /dev/block/mapper/pl_a /dev/block/by-name/preloader_raw_a
     symlink /dev/block/mapper/pl_b /dev/block/by-name/preloader_raw_b
     symlink /dev/block/mapper/pl_a /dev/block/platform/bootdevice/by-name/preloader_raw_a
@@ -124,34 +48,83 @@ on property:vendor.mtk.boot1_linkb=1
 
 on property:vendor.mtk.boot1_linkc=1
     symlink /dev/block/sdc /dev/block/mmcblk0boot1
+    
+on boot
+    chown system system /dev/xiaomi-touch
+    chmod 0664 /dev/xiaomi-touch
+    chown system system /sys/class/touch/tp_dev/fod_status
+    chmod 0664 /sys/class/touch/tp_dev/fod_status
 
+service touchfeature-hal-1-0 /vendor/bin/hw/vendor.xiaomi.hardware.touchfeature@1.0-service
+    class main
+    user root
+    group root
+    onrestart restart touchfeature-hal-1-0
+    seclabel u:r:recovery:s0
+    
+    
+service mtk.plpath.utils.link /system/bin/mtk_plpath_utils
+    class main
+    user root
+    group root system
+    disabled
+    oneshot
+    seclabel u:r:recovery:s0
+
+service keymint-beanpod /vendor/bin/hw/android.hardware.security.keymint@1.0-service.beanpod
+    interface android.hardware.keymaster@4.0::IKeymasterDevice default
+    interface android.hardware.keymaster@4.1::IKeymasterDevice default
+    user root
+    group root drmrpc
+    disabled
+    oneshot
+    seclabel u:r:recovery:s0
+
+service gatekeeper-1-0 /vendor/bin/hw/android.hardware.gatekeeper@1.0-service
+    interface android.hardware.gatekeeper@1.0::IGatekeeper default
+    user root
+    group root
+    disabled
+    seclabel u:r:recovery:s0
+
+service vendor.vibrator-default /vendor/bin/hw/android.hardware.vibrator-service.mediatek
+    class hal
+    user root
+    group root system
+    seclabel u:r:recovery:s0
+    
 on property:hwservicemanager.ready=true
     start teei_daemon
-    start gatekeeperd
+    start gatekeeper-1-0
     start keymint-beanpod
     start keymaster
     
     
 on property:vendor.sys.listener.registered=true
     start teei_daemon
-    start gatekeeperd
+    start gatekeeper-1-0
     start keymint-beanpod
     start keymaster
    
 on property:ro.crypto.state=unsupported
     stop teei_daemon
     stop keymint-beanpod
-    stop gatekeeperd
+    stop gatekeeper-1-0
     stop keymaster-4-1
 
 on property:ro.crypto.state=unencrypted
     stop teei_daemon
     stop keymint-beanpod
-    stop gatekeeperd
+    stop gatekeeper-1-0
     stop keymaster
     
 on property:twrp.all.users.decrypted=true
     stop teei_daemon
     stop keymint-beanpod
-    stop gatekeeperd
+    stop gatekeeper-1-0
     stop keymaster
+
+on boot
+    start health-hal-2-1
+    start vendor.vibrator-default
+    setprop sys.usb.config adb
